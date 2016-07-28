@@ -10,6 +10,10 @@ package org.mule.extension.ws.api;
 import static java.util.Collections.emptyMap;
 import org.mule.extension.ws.api.builder.DocumentBuilder;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.StringWriter;
 import java.util.Map;
 
 import javax.xml.namespace.QName;
@@ -25,28 +29,48 @@ import javax.xml.soap.SOAPPart;
 import javax.xml.stream.XMLInputFactory;
 import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
+import javax.xml.transform.OutputKeys;
+import javax.xml.transform.Transformer;
+import javax.xml.transform.TransformerException;
+import javax.xml.transform.TransformerFactory;
 import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.stax.StAXSource;
+import javax.xml.transform.stream.StreamResult;
 import javax.xml.ws.BindingProvider;
 import javax.xml.ws.Dispatch;
 import javax.xml.ws.Service;
 import javax.xml.ws.soap.SOAPBinding;
 
+import org.apache.cxf.staxutils.StaxSource;
+import org.apache.http.HttpEntity;
+import org.apache.http.HttpResponse;
+import org.apache.http.client.HttpClient;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.entity.ByteArrayEntity;
+import org.apache.http.impl.client.DefaultHttpClient;
 import org.w3c.dom.Document;
 import org.w3c.dom.NamedNodeMap;
 import org.w3c.dom.NodeList;
 
 public class SoapProxyClient
 {
-
-    private static XMLInputFactory inputFactory = XMLInputFactory.newInstance();
+    private static final XMLInputFactory inputFactory = XMLInputFactory.newInstance();
     private static final String XMLSOAP_ORG_SOAP_ENCODING_NAMESPACE = "http://schemas.xmlsoap.org/soap/encoding/";
 
     private final ServiceDefinition serviceDefinition;
+    private final MessageFactory messageFactory;
 
     private SoapProxyClient(ServiceDefinition service)
     {
         serviceDefinition = service;
+        try
+        {
+            messageFactory = MessageFactory.newInstance();
+        }
+        catch (SOAPException e)
+        {
+            throw new RuntimeException(e);
+        }
     }
 
     public static SoapProxyClient create(ServiceDefinition service)
@@ -64,55 +88,58 @@ public class SoapProxyClient
         return invoke(operationName, payload, DocumentBuilder.getInstance(), headers);
     }
 
-    //private InputStream post(SOAPMessage message) throws TransformerException, SOAPException, XMLStreamException, IOException
-    //{
-    //    HttpClient client = new DefaultHttpClient();
-    //    HttpPost post = new HttpPost(definition.getBaseEndpoint());
-    //    XMLStreamReader xmlStreamReader = soapMessageToXmlStream(message);
-    //
-    //    Transformer transformer = TransformerFactory.newInstance().newTransformer();
-    //    StringWriter stringWriter = new StringWriter();
-    //    transformer.transform(new StAXSource(xmlStreamReader), new StreamResult(stringWriter));
-    //
-    //    HttpEntity entity = new ByteArrayEntity(stringWriter.toString().getBytes());
-    //    post.setEntity(entity);
-    //    HttpResponse response = client.execute(post);
-    //    return response.getEntity().getContent();
-    //}
-
     public XMLStreamReader invoke(String operationName, XMLStreamReader payload, DocumentBuilder docBuilder, Map<String, String> headers){
 
         try {
             final Dispatch<SOAPMessage> dispatch = buildMessageDispatch(operationName);
-
             final SOAPMessage soapRequest = buildSoapRequest(payload, operationName, dispatch, docBuilder, headers);
 
-            final SOAPMessage soapResponse = dispatch.invoke(soapRequest);
+            // Aca deberia ir la cagada que llama a lo que se configuro como transporte
+            InputStream post = post(soapRequest);
 
 
-
-
-
-
-            // If the serviceDefinition responds a 202 status, the payload will be null.
-            // Therefore soapResponse is null. See org.apache.cxf.endpoint.ClientImpl,line 609.
-            if (soapResponse != null && !soapResponse.getSOAPBody().hasFault())  {
-                final SOAPBodyElement sourceContent = (SOAPBodyElement) soapResponse.getSOAPBody().getChildElements().next();
-
-                // Add the namespaces from the response Envelope tag to the result
-                // tag - so it can be parsed successfully by DataMapper
-                final SOAPPart soapPart = soapRequest.getSOAPPart();
-                final SOAPEnvelope soapEnvelope = soapPart.getEnvelope();
-
-                return soapResponseToXmlStream(soapResponse, sourceContent, soapEnvelope);
-            }
-
-
+            SOAPMessage message = messageFactory.createMessage(null, post);
+            soapMessageToString(message);
+            Document document = message.getSOAPBody().extractContentAsDocument();
+            return inputFactory.createXMLStreamReader(new DOMSource(document));
 
         } catch (final Exception e) {
             throw new RuntimeException(e);
         }
-        return null;
+    }
+
+    private String soapMessageToString(SOAPMessage message) throws SOAPException, IOException
+    {
+        ByteArrayOutputStream os = new ByteArrayOutputStream();
+        message.writeTo(os);
+        return new String(os.toByteArray());
+    }
+
+    private String getStringOfReader(XMLStreamReader e) throws TransformerException
+    {
+        Transformer transformer = TransformerFactory.newInstance().newTransformer();
+        transformer.setOutputProperty(OutputKeys.OMIT_XML_DECLARATION, "yes");
+        transformer.setOutputProperty(OutputKeys.INDENT, "yes");
+
+        StringWriter stringWriter = new StringWriter();
+        final StaxSource xmlSource = new StaxSource(e);
+        transformer.transform(xmlSource, new StreamResult(stringWriter));
+
+        return stringWriter.toString();
+    }
+
+    private InputStream post(SOAPMessage message) throws TransformerException, SOAPException, XMLStreamException, IOException
+    {
+        HttpClient client = new DefaultHttpClient();
+        HttpPost post = new HttpPost(serviceDefinition.getBaseEndpoint());
+
+        ByteArrayOutputStream os = new ByteArrayOutputStream();
+        message.writeTo(os);
+
+        HttpEntity entity = new ByteArrayEntity(os.toByteArray());
+        post.setEntity(entity);
+        HttpResponse response = client.execute(post);
+        return response.getEntity().getContent();
     }
 
     public Dispatch<SOAPMessage> buildMessageDispatch(String operationName) {
@@ -212,8 +239,15 @@ public class SoapProxyClient
     }
 
 
-    static XMLStreamReader soapResponseToXmlStream(SOAPMessage soapResponse, SOAPBodyElement sourceContent, SOAPEnvelope soapEnvelope)
+    static XMLStreamReader soapResponseToXmlStream(SOAPMessage soapResponse)
             throws SOAPException, XMLStreamException {
+
+        final SOAPBodyElement sourceContent = (SOAPBodyElement) soapResponse.getSOAPBody().getChildElements().next();
+
+        // Add the namespaces from the response Envelope tag to the result
+        // tag - so it can be parsed successfully by DataMapper
+        final SOAPPart soapPart = soapResponse.getSOAPPart();
+        final SOAPEnvelope soapEnvelope = soapPart.getEnvelope();
 
         final SOAPPart responsePart = soapResponse.getSOAPPart();
         final NodeList childNodes = responsePart.getChildNodes();
