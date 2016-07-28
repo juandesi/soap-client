@@ -1,0 +1,3 @@
+<ns2:echoResponse xmlns:ns2="http://consumer.ws.extension.mule.org/" xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+    <text>test response</text>
+</ns2:echoResponse>

@@ -1,0 +1,3 @@
+<ns2:noParamsResponse xmlns:ns2="http://consumer.ws.extension.mule.org/" xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+    <text>TEST</text>
+</ns2:noParamsResponse>
