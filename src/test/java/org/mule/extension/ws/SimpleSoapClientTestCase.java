@@ -10,17 +10,21 @@ import static javax.xml.ws.Endpoint.publish;
 import static junit.framework.TestCase.assertNotNull;
 import static org.custommonkey.xmlunit.XMLUnit.compareXML;
 import static org.hamcrest.core.Is.is;
+import static org.hamcrest.core.StringContains.containsString;
 import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 import static org.mule.extension.ws.SoapClientTestUtils.readXml;
 import static org.mule.extension.ws.SoapClientTestUtils.xmlStreamToString;
 import org.mule.extension.ws.api.ServiceDefinition;
 import org.mule.extension.ws.api.SoapProxyClient;
+import org.mule.extension.ws.api.exception.SoapFaultException;
 import org.mule.extension.ws.consumer.TestService;
 
 import java.io.IOException;
 import java.io.StringReader;
 import java.io.StringWriter;
+import java.util.Arrays;
+import java.util.List;
 
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
@@ -38,13 +42,18 @@ import org.custommonkey.xmlunit.Diff;
 import org.custommonkey.xmlunit.XMLUnit;
 import org.junit.After;
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.ExpectedException;
 import org.w3c.dom.Document;
 import org.xml.sax.InputSource;
 import org.xml.sax.SAXException;
 
 public class SimpleSoapClientTestCase
 {
+
+    @Rule
+    public ExpectedException expectedException = ExpectedException.none();
 
     private static final String SERVICE_URL = "http://localhost:6045/testService";
     private static final String NAMESPACE = "http://consumer.ws.extension.mule.org/";
@@ -91,9 +100,18 @@ public class SimpleSoapClientTestCase
     @Test
     public void failOperation() throws Exception
     {
-        XMLStreamReader output = soapClient.invoke("fail", readXml("request/fail.xml"));
+        expectedException.expect(SoapFaultException.class);
+        expectedException.expectMessage(containsString("test"));
+        soapClient.invoke("fail", readXml("request/fail.xml"));
+    }
+
+    @Test
+    public void echoOperationWithHeaders() throws Exception
+    {
+        List<XMLStreamReader> headers = Arrays.asList(readXml("request/headerInOut.xml"), readXml("request/headerIn.xml"));
+        XMLStreamReader output = soapClient.invoke("echoWithHeaders", readXml("request/echoWithHeaders.xml"), headers);
         assertNotNull(output);
-        assertSimilarXml(readXml("response/fail.xml"), output);
+        assertSimilarXml(readXml("response/echoWithHeaders.xml"), output);
     }
 
     @After
@@ -106,11 +124,16 @@ public class SimpleSoapClientTestCase
     {
         String outputString = xmlStreamToString(output);
         String expectedString = xmlStreamToString(expected);
-        System.out.println("Expected xml is: \n");
-        System.out.println(prettyPrint(expectedString));
-        System.out.println("\n\n\n Output is: \n");
-        System.out.println(prettyPrint(outputString));
         Diff diff = compareXML(outputString, expectedString);
+
+        if (!diff.similar())
+        {
+            System.out.println("Expected xml is: \n");
+            System.out.println(prettyPrint(expectedString));
+            System.out.println("\n\n\n Output is: \n");
+            System.out.println(prettyPrint(outputString));
+        }
+
         assertThat(diff.similar(), is(true));
     }
 

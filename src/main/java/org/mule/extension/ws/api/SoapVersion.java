@@ -6,19 +6,29 @@
  */
 package org.mule.extension.ws.api;
 
+import static javax.xml.soap.SOAPConstants.SOAP_1_1_PROTOCOL;
+import static javax.xml.soap.SOAPConstants.SOAP_1_2_PROTOCOL;
+
 public enum SoapVersion
 {
-    SOAP_11("1.1"), SOAP_12("1.2");
+    SOAP_11("1.1", SOAP_1_1_PROTOCOL), SOAP_12("1.2", SOAP_1_2_PROTOCOL);
 
     private String version;
+    private String protocol;
 
-    SoapVersion(String version)
+    SoapVersion(String version, String protocol)
     {
         this.version = version;
+        this.protocol = protocol;
     }
 
     public String getVersion()
     {
         return version;
+    }
+
+    public String getProtocol()
+    {
+        return protocol;
     }
 }

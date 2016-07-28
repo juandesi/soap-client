@@ -6,11 +6,49 @@
  */
 package org.mule.extension.ws.api.exception;
 
+import javax.xml.namespace.QName;
+
+import org.w3c.dom.Element;
+
 public class SoapFaultException extends RuntimeException
 {
+    private final QName faultCode;
+    private final QName subCode;
+    private final Element detail;
 
-    public SoapFaultException(Throwable cause)
+    public SoapFaultException(QName faultCode,
+                              QName subCode,
+                              String message,
+                              Element detail)
     {
-        super(cause);
+        super(message);
+        this.faultCode = faultCode;
+        this.subCode = subCode;
+        this.detail = detail;
+    }
+
+    public SoapFaultException(QName faultCode,
+                              String message,
+                              Element detail)
+    {
+        super(message);
+        this.faultCode = faultCode;
+        this.detail = detail;
+        this.subCode = null;
+    }
+
+    public QName getFaultCode()
+    {
+        return faultCode;
+    }
+
+    public QName getSubCode()
+    {
+        return subCode;
+    }
+
+    public Element getDetail()
+    {
+        return detail;
     }
 }

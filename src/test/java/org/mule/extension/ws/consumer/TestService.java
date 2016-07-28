@@ -41,7 +41,7 @@ public class TestService
     {
         headerOut.value = headerIn + " OUT";
         headerInOut.value = headerInOut.value + " INOUT";
-        return s;
+        return echo(s);
     }
 
     @WebResult(name = "text")
