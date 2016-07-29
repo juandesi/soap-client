@@ -99,11 +99,11 @@ public class SoapProxyClient
             SOAPMessage message = messageFactory.createMessage(null, post.getBody());
             SOAPBody resultBody = message.getSOAPBody();
 
-            if (resultBody.hasFault())
+            if (resultBody.hasFault() && resultBody.getFault() != null) // check this if
             {
                 SOAPFault fault = resultBody.getFault();
                 throw new SoapFaultException(fault.getFaultCodeAsQName(),
-                                             null,
+                                             null, // This parameter only apply for SOAP 1.2
                                              fault.getFaultString(),
                                              fault.getDetail());
             }
@@ -152,19 +152,15 @@ public class SoapProxyClient
             for (InputStream attachment : attachments)
             {
                 StringBody part = new StringBody(org.apache.commons.io.IOUtils.toString(attachment), ContentType.TEXT_PLAIN);
-                builder.addPart(FormBodyPartBuilder.create("first-attachment", part).build());
+                builder.addPart(FormBodyPartBuilder.create("9999", part).addField("Content-ID", "<9999>").addField("Part", "9999").addField("Type", "CONTENT").build());
             }
-
-            //builder.addPart(FormBodyPartBuilder.create("second-attachment", new FileBody(new File(IOUtils.getResourceAsUrl("another_attachment_file.txt", getClass()).getPath()), ContentType.TEXT_XML)).addField("Content-ID", "<second-attachment>").build());
-
 
             builder.seContentType(ContentType.create("multipart/related"));
             entity = builder.build();
             ByteArrayOutputStream test = new ByteArrayOutputStream();
             entity.writeTo(test);
 
-            String testfsa = new String(test.toByteArray());
-            String testfasdsa = new String(test.toByteArray());
+            System.out.println(new String(test.toByteArray()));
         }
         else
         {
@@ -178,7 +174,6 @@ public class SoapProxyClient
 
         client.close();
 
-
         httpPost.addHeader("SOAPAction", operationName);  // ????? fijate esto pero por ahora lo mando igual.
 
         HttpEntity result = response.getEntity();
@@ -190,7 +185,10 @@ public class SoapProxyClient
             String[] split = s.split("\r\n\r\n");
 
             List<InputStream> streams = split.length > 2 ? singletonList(new ByteArrayInputStream(split[2].substring(0, split[2].indexOf("--uuid")).getBytes())) : emptyList();
-            return new SoapResponse(new ByteArrayInputStream(split[1].substring(0, split[1].indexOf("--uuid")).getBytes()), streams);
+
+            String is = split[1].contains("--uuid") ? split[1].substring(0, split[1].indexOf("--uuid")) : split[1];
+
+            return new SoapResponse(new ByteArrayInputStream(is.getBytes()), streams);
         }
         else
         {

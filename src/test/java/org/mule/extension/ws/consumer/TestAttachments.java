@@ -7,7 +7,7 @@
 package org.mule.extension.ws.consumer;
 
 
-import static org.apache.cxf.common.classloader.ClassLoaderUtils.getResourceAsStream;
+import org.mule.runtime.core.util.IOUtils;
 
 import java.io.File;
 import java.io.IOException;
@@ -23,8 +23,6 @@ import javax.jws.WebResult;
 import javax.jws.WebService;
 import javax.xml.ws.soap.MTOM;
 
-import org.apache.commons.io.IOUtils;
-
 
 @MTOM
 @WebService(portName = "TestAttachmentsPort", serviceName = "TestAttachmentsService")
@@ -39,15 +37,13 @@ public class TestAttachments
         try
         {
             String received = IOUtils.toString(attachment.getInputStream());
-            String expected = IOUtils.toString(getResourceAsStream(fileName, getClass()));
-
-            if (received.equals(expected))
+            if (received.contains("some content"))
             {
                 return "OK";
             }
             else
             {
-                return "UNEXPECTED CONTENT";
+                return "UNEXPECTED CONTENT: " + received;
             }
         }
         catch (IOException e)
