@@ -8,9 +8,12 @@ package org.mule.extension.ws.api;
 
 
 import static java.util.Collections.emptyList;
+import static java.util.Collections.singletonList;
 import org.mule.extension.ws.api.builder.DocumentBuilder;
 import org.mule.extension.ws.api.exception.SoapFaultException;
+import org.mule.runtime.core.util.IOUtils;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -35,11 +38,15 @@ import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.stax.StAXSource;
 
 import org.apache.http.HttpEntity;
-import org.apache.http.HttpResponse;
-import org.apache.http.client.HttpClient;
+import org.apache.http.client.entity.EntityBuilder;
+import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpPost;
-import org.apache.http.entity.ByteArrayEntity;
-import org.apache.http.impl.client.DefaultHttpClient;
+import org.apache.http.entity.ContentType;
+import org.apache.http.entity.mime.FormBodyPartBuilder;
+import org.apache.http.entity.mime.MultipartEntityBuilder;
+import org.apache.http.entity.mime.content.StringBody;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.HttpClients;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.NamedNodeMap;
@@ -72,28 +79,24 @@ public class SoapProxyClient
         return new SoapProxyClient(service, SoapVersion.SOAP_11);
     }
 
-    public XMLStreamReader invoke(String operationName, XMLStreamReader payload)
+    public Response invoke(String operationName, XMLStreamReader payload)
     {
-        return invoke(operationName, payload, DocumentBuilder.getInstance(), emptyList());
+        return invoke(operationName, payload, emptyList(), emptyList());
     }
 
-    public XMLStreamReader invoke(String operationName, XMLStreamReader payload, List<XMLStreamReader> headers)
+    public Response invoke(String operationName, XMLStreamReader payload, List<XMLStreamReader> headers, List<InputStream> attachments)
     {
-        return invoke(operationName, payload, DocumentBuilder.getInstance(), headers);
-    }
-
-    public XMLStreamReader invoke(String operationName, XMLStreamReader payload, DocumentBuilder docBuilder, List<XMLStreamReader> headers)
-    {
-
         try
         {
-            final SOAPMessage soapRequest = buildSoapRequest(payload, operationName, docBuilder, headers);
+            final SOAPMessage soapRequest = buildSoapRequest(payload, operationName, DocumentBuilder.getInstance(), headers);
 
             // Aca deberia ir la cagada que llama a lo que se configuro como transporte
-            InputStream post = post(soapRequest);
-            // ***********
 
-            SOAPMessage message = messageFactory.createMessage(null, post);
+            // La request tiene que armarse como un "Multipart Payload" con Attachments (content, contentType, encoding) y el Body
+            // y pasarselo al transporte especifico que se configuro para que el sepa que hacer especificamente con eso.
+            SoapResponse post = post(soapRequest, attachments, operationName);
+
+            SOAPMessage message = messageFactory.createMessage(null, post.getBody());
             SOAPBody resultBody = message.getSOAPBody();
 
             if (resultBody.hasFault())
@@ -106,15 +109,17 @@ public class SoapProxyClient
             }
 
             Document document = resultBody.extractContentAsDocument();
-            return inputFactory.createXMLStreamReader(new DOMSource(document));
+            return new Response(inputFactory.createXMLStreamReader(new DOMSource(document)), post.getAttachments());
 
         }
         catch (SoapFaultException e)
         {
+            // Error on the SOAPCall
             throw e;
         }
         catch (Exception e)
         {
+            // What should I throw here???? ni idea wachin, soap fault maybe?
             throw new RuntimeException(e);
         }
     }
@@ -128,18 +133,70 @@ public class SoapProxyClient
         return new String(os.toByteArray());
     }
 
-    private InputStream post(SOAPMessage message) throws TransformerException, SOAPException, XMLStreamException, IOException
+
+    // SUPER IGNORE este metodo es momentaneo para la POC, para transportar el mensaje por algun medio
+    private SoapResponse post(SOAPMessage message, List<InputStream> attachments, String operationName) throws TransformerException, SOAPException, XMLStreamException, IOException
     {
-        HttpClient client = new DefaultHttpClient();
-        HttpPost post = new HttpPost(serviceDefinition.getBaseEndpoint());
 
         ByteArrayOutputStream os = new ByteArrayOutputStream();
         message.writeTo(os);
 
-        HttpEntity entity = new ByteArrayEntity(os.toByteArray());
-        post.setEntity(entity);
-        HttpResponse response = client.execute(post);
-        return response.getEntity().getContent();
+        CloseableHttpClient client = HttpClients.createDefault();
+        HttpPost httpPost = new HttpPost(serviceDefinition.getBaseEndpoint());
+        HttpEntity entity;
+        if (!attachments.isEmpty())
+        {
+            MultipartEntityBuilder builder = MultipartEntityBuilder.create();
+            builder.addPart(FormBodyPartBuilder.create("envelope", new StringBody(new String(os.toByteArray()), ContentType.TEXT_XML)).build());
+
+            for (InputStream attachment : attachments)
+            {
+                StringBody part = new StringBody(org.apache.commons.io.IOUtils.toString(attachment), ContentType.TEXT_PLAIN);
+                builder.addPart(FormBodyPartBuilder.create("first-attachment", part).build());
+            }
+
+            //builder.addPart(FormBodyPartBuilder.create("second-attachment", new FileBody(new File(IOUtils.getResourceAsUrl("another_attachment_file.txt", getClass()).getPath()), ContentType.TEXT_XML)).addField("Content-ID", "<second-attachment>").build());
+
+
+            builder.seContentType(ContentType.create("multipart/related"));
+            entity = builder.build();
+            ByteArrayOutputStream test = new ByteArrayOutputStream();
+            entity.writeTo(test);
+
+            String testfsa = new String(test.toByteArray());
+            String testfasdsa = new String(test.toByteArray());
+        }
+        else
+        {
+            entity = EntityBuilder.create().setText(new String(os.toByteArray())).build();
+        }
+
+        httpPost.setEntity(entity);
+        CloseableHttpResponse response = client.execute(httpPost);
+
+        response.close();
+
+        client.close();
+
+
+        httpPost.addHeader("SOAPAction", operationName);  // ????? fijate esto pero por ahora lo mando igual.
+
+        HttpEntity result = response.getEntity();
+
+        if (result.getContentType().getValue().contains("multipart"))
+        {
+            // Magia negra para obtener body y attachment del test. esto vuela con el transporte configurado
+            String s = IOUtils.toString(result.getContent());
+            String[] split = s.split("\r\n\r\n");
+
+            List<InputStream> streams = split.length > 2 ? singletonList(new ByteArrayInputStream(split[2].substring(0, split[2].indexOf("--uuid")).getBytes())) : emptyList();
+            return new SoapResponse(new ByteArrayInputStream(split[1].substring(0, split[1].indexOf("--uuid")).getBytes()), streams);
+        }
+        else
+        {
+            return new SoapResponse(result.getContent(), emptyList());
+        }
+
     }
 
     public SOAPMessage buildSoapRequest(XMLStreamReader payload,
@@ -165,7 +222,7 @@ public class SoapProxyClient
         //    soapHeaderBuilder.build(header, serviceDefinition);
         //}
 
-        for(XMLStreamReader reader : headers)
+        for (XMLStreamReader reader : headers)
         {
             Document document = docBuilder.createDocument(reader);
             Element element = document.getDocumentElement();
@@ -223,4 +280,26 @@ public class SoapProxyClient
         return stAXSource.getXMLStreamReader();
     }
 
+
+    private class SoapResponse
+    {
+        private InputStream body;
+        private List<InputStream> attachments;
+
+        public SoapResponse(InputStream body, List<InputStream> attachments)
+        {
+            this.body = body;
+            this.attachments = attachments;
+        }
+
+        public InputStream getBody()
+        {
+            return body;
+        }
+
+        public List<InputStream> getAttachments()
+        {
+            return attachments;
+        }
+    }
 }

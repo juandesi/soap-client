@@ -6,11 +6,14 @@
  */
 package org.mule.extension.ws.consumer;
 
-import org.mule.runtime.core.util.IOUtils;
+
+import static org.apache.cxf.common.classloader.ClassLoaderUtils.getResourceAsStream;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
+import java.net.MalformedURLException;
+import java.net.URISyntaxException;
+import java.net.URL;
 
 import javax.activation.DataHandler;
 import javax.activation.FileDataSource;
@@ -18,8 +21,10 @@ import javax.jws.WebMethod;
 import javax.jws.WebParam;
 import javax.jws.WebResult;
 import javax.jws.WebService;
-import javax.xml.ws.Holder;
 import javax.xml.ws.soap.MTOM;
+
+import org.apache.commons.io.IOUtils;
+
 
 @MTOM
 @WebService(portName = "TestAttachmentsPort", serviceName = "TestAttachmentsService")
@@ -33,10 +38,10 @@ public class TestAttachments
     {
         try
         {
-            InputStream received = attachment.getInputStream();
-            InputStream expected = IOUtils.getResourceAsStream(fileName, getClass());
+            String received = IOUtils.toString(attachment.getInputStream());
+            String expected = IOUtils.toString(getResourceAsStream(fileName, getClass()));
 
-            if (IOUtils.contentEquals(received, expected))
+            if (received.equals(expected))
             {
                 return "OK";
             }
@@ -55,14 +60,20 @@ public class TestAttachments
     @WebMethod(action = "downloadAttachment")
     public DataHandler downloadAttachment(@WebParam(mode = WebParam.Mode.IN, name = "fileName") String fileName)
     {
-        File file = new File(IOUtils.getResourceAsUrl(fileName, getClass()).getPath());
+        File file = new File(getResourceAsUrl(fileName).getPath());
         return new DataHandler(new FileDataSource(file));
     }
 
-    @WebMethod(action = "echoAttachment")
-    public void echoAttachment(@WebParam(mode = WebParam.Mode.INOUT, name = "attachment") Holder<DataHandler> attachment)
+    private URL getResourceAsUrl(String fileName)
     {
-        // Do nothing.
+        try
+        {
+            return Thread.currentThread().getContextClassLoader().getResource(fileName).toURI().toURL();
+        }
+        catch (MalformedURLException | URISyntaxException e)
+        {
+            throw new RuntimeException(e);
+        }
     }
 
 }

@@ -9,24 +9,22 @@ package org.mule.extension.ws;
 import static java.util.Collections.emptyList;
 import static java.util.Collections.singletonList;
 import static javax.xml.ws.Endpoint.publish;
-import static junit.framework.TestCase.assertNotNull;
 import static org.custommonkey.xmlunit.XMLUnit.compareXML;
 import static org.hamcrest.core.Is.is;
-import static org.hamcrest.core.StringContains.containsString;
 import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 import static org.mule.extension.ws.SoapClientTestUtils.readXml;
 import static org.mule.extension.ws.SoapClientTestUtils.xmlStreamToString;
+import org.mule.extension.ws.api.Response;
 import org.mule.extension.ws.api.ServiceDefinition;
 import org.mule.extension.ws.api.SoapProxyClient;
-import org.mule.extension.ws.api.exception.SoapFaultException;
-import org.mule.extension.ws.consumer.TestService;
+import org.mule.extension.ws.consumer.TestAttachments;
+import org.mule.runtime.core.util.IOUtils;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.StringReader;
 import java.io.StringWriter;
-import java.util.Arrays;
-import java.util.List;
 
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
@@ -42,6 +40,7 @@ import javax.xml.ws.Endpoint;
 
 import org.custommonkey.xmlunit.Diff;
 import org.custommonkey.xmlunit.XMLUnit;
+import org.hamcrest.core.StringContains;
 import org.junit.BeforeClass;
 import org.junit.Rule;
 import org.junit.Test;
@@ -50,77 +49,44 @@ import org.w3c.dom.Document;
 import org.xml.sax.InputSource;
 import org.xml.sax.SAXException;
 
-public class SimpleSoapClientTestCase
+public class AttachmentsSoapClientTestCase
 {
 
     @Rule
     public ExpectedException expectedException = ExpectedException.none();
 
-    private static final String SERVICE_URL = "http://localhost:6045/testService";
+    private static final String SERVICE_URL = "http://localhost:6043/attachmentService";
     private static final String NAMESPACE = "http://consumer.ws.extension.mule.org/";
     private static final ServiceDefinition TEST_SERVICE_DEFINITION = new ServiceDefinition(SERVICE_URL, NAMESPACE, "TestService", "TestPort");
-
-    private static Endpoint service;
     private static SoapProxyClient soapClient;
 
     @BeforeClass
     public static void setup()
     {
         XMLUnit.setIgnoreWhitespace(true);
-        TestService testService = new TestService();
-        service = publish(SERVICE_URL, testService);
+        Endpoint service = publish(SERVICE_URL, new TestAttachments());
         assertTrue(service.isPublished());
         soapClient = SoapProxyClient.create(TEST_SERVICE_DEFINITION);
     }
 
     @Test
-    public void simpleOperation() throws Exception
+    public void upload() throws Exception
     {
-        XMLStreamReader output = soapClient.invoke("echo", readXml("request/echo.xml")).getBody();
-        assertNotNull(output);
-        assertSimilarXml(readXml("response/echo.xml"), output);
+        Response output = soapClient.invoke("uploadAttachment", readXml("request/attachment/uploadAttachment.xml"), emptyList(), singletonList(getAttachment()));
+        assertSimilarXml(readXml("response/echoWithHeaders.xml"), output.getBody());
     }
 
     @Test
-    public void complexTypeOperation() throws Exception
+    public void download() throws Exception
     {
-        XMLStreamReader output = soapClient.invoke("echoAccount", readXml("request/echoAccount.xml")).getBody();
-        assertNotNull(output);
-        assertSimilarXml(readXml("response/echoAccount.xml"), output);
+        Response response = soapClient.invoke("downloadAttachment", readXml("request/attachment/downloadAttachment.xml"));
+        assertThat(response.getAtt().size(), is(1));
+        assertThat(IOUtils.toString(response.getAtt().get(0)), StringContains.containsString("some content"));
     }
 
-    @Test
-    public void noParamsOperation() throws Exception
+    private InputStream getAttachment()
     {
-        XMLStreamReader output = soapClient.invoke("noParams", readXml("request/noParams.xml")).getBody();
-        assertNotNull(output);
-        assertSimilarXml(readXml("response/noParams.xml"), output);
-    }
-
-    @Test
-    public void noParamsOperationWithHeader() throws Exception
-    {
-        XMLStreamReader output = soapClient.invoke("noParams", readXml("request/noParamsWithHeader.xml"), singletonList(readXml("request/headerIn.xml")), emptyList()).getBody();
-        assertNotNull(output);
-        assertSimilarXml(readXml("response/noParamsWithHeader.xml"), output);
-    }
-
-
-    @Test
-    public void failOperation() throws Exception
-    {
-        expectedException.expect(SoapFaultException.class);
-        expectedException.expectMessage(containsString("test"));
-        soapClient.invoke("fail", readXml("request/fail.xml"));
-    }
-
-    @Test
-    public void echoOperationWithHeaders() throws Exception
-    {
-        List<XMLStreamReader> headers = Arrays.asList(readXml("request/headerInOut.xml"), readXml("request/headerIn.xml"));
-        XMLStreamReader output = soapClient.invoke("echoWithHeaders", readXml("request/echoWithHeaders.xml"), headers, emptyList()).getBody();
-        assertNotNull(output);
-        assertSimilarXml(readXml("response/echoWithHeaders.xml"), output);
+        return Thread.currentThread().getContextClassLoader().getResourceAsStream("attachment_file.txt");
     }
 
     private void assertSimilarXml(XMLStreamReader expected, XMLStreamReader output) throws Exception

@@ -6,9 +6,6 @@
  */
 package org.mule.extension.ws.api;
 
-import static org.apache.commons.lang.builder.ToStringBuilder.reflectionToString;
-import static org.apache.commons.lang.builder.ToStringStyle.SIMPLE_STYLE;
-
 public class ServiceDefinition
 {
 
@@ -46,12 +43,6 @@ public class ServiceDefinition
     public String getBaseEndpoint()
     {
         return baseEndpoint;
-    }
-
-    @Override
-    public String toString()
-    {
-        return reflectionToString(this, SIMPLE_STYLE);
     }
 
 }

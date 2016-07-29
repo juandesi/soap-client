@@ -53,7 +53,7 @@ public class TestService
 
     @WebResult(name = "text")
     @WebMethod(action = "noParams")
-    public String noParamsWithHeader(@WebParam(name = "header", header = true, mode = WebParam.Mode.IN) String header)
+    public String noParamsWithHeader(@WebParam(name = "headerIn", header = true, mode = WebParam.Mode.IN) String header)
     {
         return header;
     }

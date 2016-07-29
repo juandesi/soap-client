@@ -1,0 +1,4 @@
+<con:uploadAttachment xmlns:con="http://consumer.ws.extension.mule.org/">
+    <fileName>attachment_file.txt</fileName>
+    <attachment>cid:961190930418</attachment>
+</con:uploadAttachment>
